@@ -5,6 +5,7 @@
     <title>Baby</title>
     <script src="phaser.js"></script>
     <script src="socket.io.js"></script>
+    <script src="jquery-3.4.1.min.js"></script>
     <style type="text/css">
         @font-face {
             font-family: pds;
@@ -21,15 +22,33 @@
 
 <script type="text/javascript">
 
-
+    var username = null;
+    var userid = new Date().getTime();
+    console.log("userid "+userid);
+    function getUsername(){
+        let d = new Date();
+        let n = d.getTime();
+        console.log("n : "+n);
+        username = prompt("Please enter your name", n);
+        if(username == null){
+            alert("Enter your name");
+            getUsername();
+        }
+        if(username == ""){
+            alert("Please, enter your name");
+            getUsername();
+        }
+    }
+    getUsername();
+    console.log(username);
 
     var socket_server_attemp = 0;
     var socket_server_limit = 5;
-var socket_server = window.location.hostname + ":5508"; // production server
+    var socket_server = window.location.hostname + ":5508"; // production server
     console.log("socket_server is " + socket_server);
     var socket = io(socket_server); // connect to socket server
     /* socket test */
-    // var socket = io(socket_server); // connect to socket server
+     var socket = io(socket_server); // connect to socket server
     var socket_message = {
         "hello": "world"
     };
@@ -71,8 +90,8 @@ var height = window.innerHeight
 // Phaser.AUTO
 // Phaser.CANVAS
 var config = {
-    type: Phaser.CANVAS,
-    width: 400,
+    type: Phaser.AUTO,
+    width: 800,
     height: 600,
     physics: {
         default: 'arcade',
@@ -94,9 +113,11 @@ var config = {
 var player;
 var stars;
 var bombs;
+var flying_stars;
 var platforms;
 var cursors;
 var score = 0;
+var playerCount = 1;
 var gameOver = false;
 var scoreText;
 var playerText;
@@ -105,10 +126,13 @@ var playerOverText;
 
 var mainScene;
 
+var socket_message;
+
 var players=[player];
 var playerOverTexts=[playerOverText];
+var player_data = [socket_message];
 
-var gameState = "game_room"; // may be game_room,game_play,game_over
+var gameState = "waiting"; // may be game_room,game_play,game_over
 var playerState = "waiting"; // may be waiting, ready, playing
 
 var game = new Phaser.Game(config);
@@ -166,7 +190,8 @@ function create ()
     platforms.create(750, 220, 'ground');
 
     // The player and its settings
-    player = this.physics.add.sprite(200, 400, 'dude');
+    let player_x = Phaser.Math.Between(10, 390);
+    player = this.physics.add.sprite(player_x, 400, 'dude');
 
 
 
@@ -206,6 +231,23 @@ function create ()
         setXY: { x: 12, y: 0, stepX: 70 }
     });
 
+    flying_stars = this.physics.add.group({
+        key: 'star',
+        repeat : 10,
+        setXY: {x : 30, y: 0 , step: 100 }
+    });
+    
+    
+    flying_stars.children.iterate(function (flying_star) {
+        flying_star.setBounceY(Phaser.Math.FloatBetween(0.7,0.9));
+        let bombVelocity = Phaser.Math.Between(0, 200);
+        flying_star.setVelocity(bombVelocity, 20);
+        flying_star.allowGravity = false;
+        flying_star.setCollideWorldBounds(true);
+
+    });
+
+
     stars.children.iterate(function (child) {
 
         //  Give each star a slightly different bounce
@@ -218,18 +260,19 @@ function create ()
     //  The score
     //scoreText = this.add.text(16, 16, 'score: 0', { fontSize: '32px', fill: '#000' });
     let mmScore = engToMmNum(score);
-    let mmPlayerCount = engToMmNum(players.length);
+    let mmPlayerCount = engToMmNum(playerCount);
     scoreText = this.add.text(16, 16, 'ရမှတ်: '+mmScore);
     // The player count
     playerText = this.add.text(16,62, 'ကစားသမား : '+mmPlayerCount);
     // The status text
     statusText = this.add.text(16,120, 'အဆင်သင့်ဖြစ်လျှင် Space နှိပ်ပါ',{ fontFamily: 'pds'});
     // playerOverText
-    playerOverText = this.add.text(player.x,player.y,"အောင်ကိုမန်း",{fontFamily:'pds'});
+    playerOverText = this.add.text(player.x,player.y,username,{fontFamily:'pds'});
 
     //  Collide the player and the stars with the platforms
     this.physics.add.collider(player, platforms);
     this.physics.add.collider(stars, platforms);
+    this.physics.add.collider(flying_stars, platforms);
     this.physics.add.collider(bombs, platforms);
 
     //  Checks to see if the player overlaps with any of the stars, if he does call the collectStar function
@@ -246,30 +289,46 @@ function create ()
 
 
     this.cameras.main.setViewport(0, 0, 400, 600);
+
+    socket_message = {
+        "username": username,
+        "user_x":player.x,
+        "user_y":player.y,
+        "userid":userid
+    };
+    socket.emit('new_player', socket_message);
 }
 
 function update ()
 {
     switch(gameState){
-        case "game_room":
-            console.log("gaeState : game_room");
+        case "waiting":
+            console.log("gaeState : waiting");
             // wait for players
             // change state on play click (all player is ready)
             //return;
             if (cursors.space.isDown){
-                gameState = "game_play";
-                //playerState = "ready";
-                //statusText.setText("အခြားသူများကို စောင့်ဆိုင်းနေပါသည်...");
+                //gameState = "game_play";
+                playerState = "ready";
+                statusText.setText("အခြားသူများကို စောင့်ဆိုင်းနေပါသည်...");
+                socket_message.status = "ready";
+                socket.emit("ready_player",socket_message);
             }
             break;
-        case "game_play":
-            console.log("gaeState : game_play");
+        case "playing":
+            //console.log("gaeState : playing");
             if (cursors.left.isDown)
             {
                 player.setVelocityX(-160);
 
                 player.anims.play('left', true);
-
+                if(socket_message.action != "left"){
+                    socket_message.action = "left";
+                    socket_message.player_x = player.x;
+                    socket_message.player_y = player.y;
+                    socket.emit("player_action",socket_message);
+                }
+                
                 //this.cameras.main.setScroll(player.x, 300);
                 
             }
@@ -278,6 +337,12 @@ function update ()
                 player.setVelocityX(160);
 
                 player.anims.play('right', true);
+                if(socket_message.action != "right"){
+                    socket_message.action = "right";
+                    socket_message.player_x = player.x;
+                    socket_message.player_y = player.y;
+                    socket.emit("player_action",socket_message);
+                }
                 //this.cameras.main.setScroll(0, 300);
             }
             else
@@ -285,33 +350,50 @@ function update ()
                 player.setVelocityX(0);
 
                 player.anims.play('turn');
+                if(socket_message.action != "stop"){
+                    socket_message.action = "stop";
+                    socket_message.player_x = player.x;
+                    socket_message.player_y = player.y;
+                    socket.emit("player_action",socket_message);
+                }
             }
 
             if (cursors.up.isDown && player.body.touching.down)
             {
                 player.setVelocityY(-330);
+                if(socket_message.action != "jump"){
+                    socket_message.action = "jump";
+                    socket_message.player_x = player.x;
+                    socket_message.player_y = player.y;
+                    socket.emit("player_action",socket_message);
+                }
             }
 
-            console.log("player "+player.x+" : "+player.y);
+            //console.log("player "+player.x+" : "+player.y);
+            //if(bombs.x > 0) bombs.setX(800);
+            //if(bombs.x < 800) bombs.setX(0);
             if(player.x >200 && player.x < 600){
                 let temp_x =  player.x - 200;
                 this.cameras.main.setScroll(temp_x,0);
                 temp_x = temp_x + 30;
                 scoreText.setX(temp_x);
-                console.log(temp_x);
+                playerText.setX(temp_x);
+                //console.log(temp_x);
             }
             if(player.x >800){
                 player.setX(0);
                 this.cameras.main.setScroll(0,0);
                 scoreText.setX(30);
+                playerText.setX(30);
             }
             if(player.x < 0){
                 player.setX(800);
                 this.cameras.main.setScroll(400,0);
                 scoreText.setX(430);
+                playerText.setX(430);
             }
             break;
-        case "game_over":
+        case "over":
             console.log("gaeState : game_over");
             break;
         default :
@@ -336,6 +418,7 @@ function update ()
 
     }
 
+    
 
     if (gameOver)
     {
@@ -353,28 +436,51 @@ function collectStar (player, star)
 
     //  Add and update the score
     score += 10;
-    scoreText.setText('Score: ' + score);
+    let mmScore = engToMmNum(score);
+    scoreText.setText('ရမှတ်: '+mmScore);
 
     if (stars.countActive(true) === 0)
     {
         //  A new batch of stars to collect
-        stars.children.iterate(function (child) {
+        //stars.children.iterate(function (child) {
 
-            child.enableBody(true, child.x, 0, true, true);
+            //child.enableBody(true, child.x, 0, true, true);
 
-        });
+        //});
 
         var x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
 
-        var bomb = bombs.create(x, 16, 'bomb');
-        bomb.setBounce(1);
-        bomb.setCollideWorldBounds(true);
-        bomb.setVelocity(Phaser.Math.Between(-200, 200), 20);
-        bomb.allowGravity = false;
+        //var bomb = bombs.create(x, 16, 'bomb');
+        //bomb.setBounce(1);
+        //bomb.setCollideWorldBounds(true);
+        let bombVelocity = Phaser.Math.Between(-200, 200);
+        //bomb.setVelocity(bombVelocity, 20);
+        //bomb.allowGravity = false;
+        socket_message.bomb_x = x;
+        socket_message.bomb_y = 16;
+        socket_message.bomb_velocity = bombVelocity;
+        socket.emit("star_iterate",socket_message);
 
     }
 }
 
+function star_iterate(data){
+        stars.children.iterate(function (child) {
+            child.disableBody(true, true);
+        });
+        stars.children.iterate(function (child) {
+            child.enableBody(true, child.x, 0, true, true);
+        });
+
+        var x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
+
+        var bomb = bombs.create(data.bomb_x, data.bomb_y, 'bomb');
+        bomb.setBounce(1);
+        bomb.setCollideWorldBounds(true);
+        let bombVelocity = data.bomb_velocity;
+        bomb.setVelocity(bombVelocity, 20);
+        bomb.allowGravity = false;
+}
 function collectStarRemote (player, star)
 {
     console.log("collectStarRemote");
@@ -393,7 +499,7 @@ function collectStarRemote (player, star)
 
         var bomb = bombs.create(x, 16, 'bomb');
         bomb.setBounce(1);
-        bomb.setCollideWorldBounds(true);
+        //bomb.setCollideWorldBounds(true);
         bomb.setVelocity(Phaser.Math.Between(-200, 200), 20);
         bomb.allowGravity = false;
 
@@ -402,74 +508,153 @@ function collectStarRemote (player, star)
 
 function hitBomb (player, bomb)
 {
-    //this.physics.pause();
+    this.physics.pause();
 
     player.setTint(0xff0000);
+    //player.setTint("red");
+    player.disableBody(true,true);
+    bomb.disableBody(true,true);
 
     player.anims.play('turn');
 
-    //gameOver = true;
+    gameOver = true;
+    gameState = "waiting";
     //window.location.assign("baby.html");
 }
 
 function hitBombRemote (player, bomb)
 {
-    //this.physics.pause();
-
-    player.setTint(0xff0000);
-
-    player.anims.play('turn');
-
-    //gameOver = true;
-    //window.location.assign("baby.html");
-}
-function newPlayer(){
     
-    let newPlayer = mainScene.physics.add.sprite(200, 100, 'dude');
+    player.disableBody(true,true);
+    bomb.disableBody(true,true);
+}
+function newPlayer(data){
+    
+    let newPlayer = mainScene.physics.add.sprite(data.user_x, data.user_y, 'dude');
     newPlayer.setBounce(0.2);
     mainScene.physics.add.collider(newPlayer, platforms);
     //this.physics.add.collider(newPlayer1, player);
     mainScene.physics.add.overlap(newPlayer, stars, collectStarRemote, null, this);
     mainScene.physics.add.collider(newPlayer, bombs, hitBombRemote, null, this);
     
-    let newPlayerOverText = mainScene.add.text(newPlayer.x,newPlayer.y,"ဖြိုးဝေအောင်",{fontFamily:'pds'});
+    let newPlayerOverText = mainScene.add.text(newPlayer.x,newPlayer.y,data.username,{fontFamily:'pds'});
     players[players.length] = newPlayer;
+    player_data[player_data.length] = data;
     playerOverTexts[playerOverTexts.length] = newPlayerOverText;
+    playerCount++;
+    let mmPlayerCount = engToMmNum(playerCount);
+    playerText.setText('ကစားသမား : '+mmPlayerCount,{fontFamily:'pds'});
+}
+function player_leave(data){
+    for(let i=0; i<player_data.length; i++){
+        if(player_data[i].socket_id == data.socket_id){
+            let player = players[i];
+            player.disableBody(true, true);
+            playerOverTexts[i].setText('');
+            //players.splice(i,1);
+            // remove player
+        }
+    }
+    playerCount--;
+    let mmPlayerCount = engToMmNum(playerCount);
+    playerText.setText('ကစားသမား : '+mmPlayerCount,{fontFamily:'pds'});
+}
+function player_action(data){
+    // find data from player_data index
+    // choose player for players by the index
+    // setVelocity to the player
+    let p_index;
+    for(let i=0; i<player_data.length; i++){
+        if(player_data[i].socket_id == data.socket_id){
+            let player = players[i];
+            console.log("curren remote player is ");
+            console.log(players);
+            console.log(i);
+            console.log(player);
+            player.setX(data.player_x);
+            player.setY(data.player_y);
+            switch (data.action){
+                case "left":
+                    player.setVelocityX(-160);
+                    player.anims.play('left', true);
+                    break;
+                case "right":
+                    player.anims.play('right', true);
+                    player.setVelocityX(160);
+                    break;
+                case "stop":
+                    player.anims.play('turn', true);
+                    player.setVelocityX(0);
+                    break;
+                case "jump":
+                    player.setVelocityY(-330);
+                    break;
+            }
+        }
+    }
 }
 
 setTimeout(function(){
-    newPlayer()
+    //newPlayer()
 },3000);
 
 // update the array :D
 // by calling respective velocity to player
 // may be falling to trap , but we applied same rule to all player
 // just need to celebrate x,y coordinate for three second via socket
-setInterval(function(){ 
-    for(let i = 1; i < players.length; i++){
-        let player = players[i];
-        let playerOverText = playerOverTexts[i];
-        let rand = Math.floor(Math.random() * Math.floor(4));
-        if(rand == 0 ){
-            player.setVelocityX(-160);
-            player.anims.play('left', true);
-        }
-        else if(rand == 1){
-            player.setVelocityX(160);
-            player.anims.play('right', true);
-        }
-        else if(rand == 2){
-            //player.setVelocityY(-330);
-            //player.anims.play('turn', true);
-        }
-        else{
-            player.setVelocityX(0);
-            player.anims.play('turn',true);
-        }
-        //playerOverText.setX(player.x-50);
-        //playerOverText.setY(player.y-50);
+
+
+
+socket.on('new_player', (data) => {
+    console.log("new_player is received from server ");
+    console.log(data);
+    newPlayer(data);
+});
+socket.on('players', (data) => {
+    console.log("players is received from server ");
+    console.log(data);
+    for(let i = 0; i<data.length; i++){
+        console.log(i);
+        console.log(data[i]);
+        newPlayer(data[i]);
     }
- }, 100);
+});
+socket.on('ready_player',(data)=>{
+    console.log("ready_player is received from server");
+    console.log(data);
+    // active or change dashboard data that these player is ready
+});
+socket.on('game_state',(data)=>{
+    console.log("game_state is received from server");
+    console.log(data);
+    gameState = data;
+    statusText.setText('');
+    // active or change dashboard data that these player is ready
+});
+socket.on('player_action',(data)=>{
+    console.log("player_action is received from server");
+    console.log(data);
+    player_action(data);
+    // active or change dashboard data that these player is ready
+});
+socket.on('player_leave',(data)=>{
+    console.log("player_leave is received form server");
+    console.log(data);
+    player_leave(data);
+});
+socket.on('star_iterate',(data)=>{
+    console.log("star_iterate is received from server");
+    console.log(data);
+    star_iterate(data);
+});
+
+//var gameCanvas = document.getElementsByTagName("canvas")[0];
+//gameCanvas.style.width = 400;
+
+$("document").on("ready",function(){
+    $("body > canvas").width(400);
+})
+
 
 </script>
 
